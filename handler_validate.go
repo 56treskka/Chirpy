@@ -10,6 +10,7 @@ func handlerValidate(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Body string `json:"body"`
 	}
+
 	type returnVals struct {
 		CleanedBody string `json:"cleaned_body"`
 	}
@@ -18,25 +19,25 @@ func handlerValidate(w http.ResponseWriter, r *http.Request) {
 	params := parameters{}
 	err := decoder.Decode(&params)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
+		respondWithError(w, 500, "Error decoding parameters", err)
 		return
 	}
 
-	const maxChirpLength = 140
-	if len(params.Body) > maxChirpLength {
-		respondWithError(w, http.StatusBadRequest, "Chirp is too long", nil)
-		return
+	if len(params.Body) > 140 {
+		respondWithError(w, 400, "Chirp is too long", nil)
 	}
 
 	banWords := map[string]struct{}{"kerfuffle": {}, "sharbert": {}, "fornax": {}}
-	cleaned := replaceWords(params.Body, banWords)
+
+	cleaned := removeWords(params.Body, banWords)
 
 	respondWithJSON(w, http.StatusOK, returnVals{
 		CleanedBody: cleaned,
 	})
+
 }
 
-func replaceWords(body string, banWords map[string]struct{}) string {
+func removeWords(body string, banWords map[string]struct{}) string {
 	words := strings.Split(body, " ")
 
 	for i, word := range words {
