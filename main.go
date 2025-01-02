@@ -16,13 +16,7 @@ import (
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	queries        *database.Queries
-}
-
-func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cfg.fileserverHits.Add(1)
-		next.ServeHTTP(w, r)
-	})
+	platform       string
 }
 
 func main() {
@@ -41,11 +35,13 @@ func main() {
 	}
 
 	dbQueries := database.New(db)
+	platform := os.Getenv("PLATFORM")
 
 	handler := http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot)))
 	apiCfg := apiConfig{
 		fileserverHits: atomic.Int32{},
 		queries:        dbQueries,
+		platform:       platform,
 	}
 
 	mux := http.NewServeMux()
@@ -53,7 +49,8 @@ func main() {
 	mux.HandleFunc("GET /api/healthz", handlerReadiness)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerRequests)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
-	mux.HandleFunc("POST /api/validate_chirp", handlerValidate)
+	mux.HandleFunc("POST /api/chirps", apiCfg.handlerCreateChirp)
+	mux.HandleFunc("POST /api/users", apiCfg.handlerCreateUser)
 
 	srv := &http.Server{
 		Addr:    ":" + port,
@@ -62,6 +59,13 @@ func main() {
 
 	log.Printf("Serving files from %s on port: %s\n", filepathRoot, port)
 	log.Fatal(srv.ListenAndServe())
+}
+
+func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cfg.fileserverHits.Add(1)
+		next.ServeHTTP(w, r)
+	})
 }
 
 func handlerReadiness(w http.ResponseWriter, r *http.Request) {
@@ -76,5 +80,17 @@ func (cfg *apiConfig) handlerRequests(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
+	if cfg.platform != "dev" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(http.StatusText(http.StatusForbidden)))
+		return
+	}
 	cfg.fileserverHits.Store(0)
+	err := cfg.queries.DeleteUsers(r.Context())
+	if err != nil {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(http.StatusText(http.StatusInternalServerError)))
+	}
 }
