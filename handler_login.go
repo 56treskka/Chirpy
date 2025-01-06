@@ -6,18 +6,20 @@ import (
 	"time"
 
 	"github.com/56treskka/Chirpy/internal/auth"
+	"github.com/56treskka/Chirpy/internal/database"
+	"github.com/google/uuid"
 )
 
 func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Password         string `json:"password"`
-		Email            string `json:"email"`
-		ExpiresInSeconds int    `json:"expires_in_seconds"`
+		Password string `json:"password"`
+		Email    string `json:"email"`
 	}
 
 	type response struct {
 		User
-		Token string `json:"token"`
+		Token        string `json:"token"`
+		RefreshToken string `json:"refresh_token"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -40,23 +42,39 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	expirationTime := time.Hour
-	if params.ExpiresInSeconds > 0 && params.ExpiresInSeconds < 3600 {
-		expirationTime = time.Duration(params.ExpiresInSeconds) * time.Second
-	}
-
 	token, err := auth.MakeJWT(user.ID, cfg.secret, expirationTime)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't create token", err)
 		return
 	}
 
+	refreshTokenStr, err := auth.MakeRefreshToken()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create refersh token string", err)
+		return
+	}
+
+	refreshToken, err := cfg.queries.CreateRefreshToken(r.Context(), database.CreateRefreshTokenParams{
+		Token: refreshTokenStr,
+		UserID: uuid.NullUUID{
+			UUID:  user.ID,
+			Valid: true,
+		},
+	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create refersh token", err)
+		return
+	}
+
 	respondWithJSON(w, http.StatusOK, response{
 		User: User{
-			Id:        user.ID,
-			CreatedAt: user.CreatedAt,
-			UpdatedAt: user.UpdatedAt,
-			Email:     user.Email,
+			Id:          user.ID,
+			CreatedAt:   user.CreatedAt,
+			UpdatedAt:   user.UpdatedAt,
+			Email:       user.Email,
+			IsChirpyRed: user.IsChirpyRed,
 		},
-		Token: token,
+		Token:        token,
+		RefreshToken: refreshToken.Token,
 	})
 }
